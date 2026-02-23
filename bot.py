@@ -105,6 +105,29 @@ def progress_bar(current, target, length=15):
 
 # ================= 점수판 갱신 =================
 
+TEAM_STYLE = {
+    "블루팀": {
+        "icon": "🔵",
+        "color": discord.Color.from_rgb(20, 40, 120),
+        "display": "블루팀"
+    },
+    "레드팀": {
+        "icon": "🔴",
+        "color": discord.Color.from_rgb(150, 20, 20),
+        "display": "레드팀"
+    },
+    "그린팀": {
+        "icon": "🟢",
+        "color": discord.Color.from_rgb(20, 120, 60),
+        "display": "그린팀"
+    },
+    "퍼플팀": {
+        "icon": "🟣",
+        "color": discord.Color.from_rgb(100, 40, 140),
+        "display": "퍼플팀"
+    },
+}
+
 async def update_board(guild):
     s = get_system(guild.id)
     if not s:
@@ -116,15 +139,10 @@ async def update_board(guild):
 
     try:
         message = await channel.fetch_message(s["board_message"])
-    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+    except:
         return
 
     target = get_target(guild.id)
-
-    embed = discord.Embed(
-        title=f"🌈 솔랭내기 점수 현황 (목표 {target}점)",
-        color=discord.Color.blurple()
-    )
 
     with db() as conn:
         rows = conn.execute("""
@@ -135,7 +153,26 @@ async def update_board(guild):
         ORDER BY total DESC
         """,(guild.id,)).fetchall()
 
+        if not rows:
+            return
+
+        top_team = rows[0]["team"]
+        embed_color = TEAM_STYLE.get(top_team, {}).get(
+            "color", discord.Color.dark_gray()
+        )
+
+        embed = discord.Embed(
+            title="🏆솔랭내기🏆",
+            description="찾아라, 솔랭전사!",
+            color=embed_color
+        )
+
         for idx, r in enumerate(rows):
+
+            style = TEAM_STYLE.get(r["team"], {})
+            icon = style.get("icon", "⚪")
+            display_name = style.get("display", r["team"].upper())
+
             members = conn.execute("""
             SELECT user_id, name, score, streak
             FROM players
@@ -146,27 +183,39 @@ async def update_board(guild):
             if not members:
                 continue
 
-            top = members[0]
+            top_member = members[0]
 
-            team_text = progress_bar(r["total"], target) + "\n\n"
+            # 헤더 (오른쪽 정렬 느낌)
+            header = f"{icon} {display_name}"
+            if idx == 0:
+                header = "🏆 " + header
+
+            header += f"  |  {r['total']}"
+
+            team_text = ""
+            team_text += progress_bar(r["total"], target) + "\n\n"
 
             for m in members:
-                crown = " 👑" if m["user_id"] == top["user_id"] else ""
-                streak_txt = f" 🔥{m['streak']}연승" if m["streak"] >= 2 else ""
-                team_text += f"{m['name']}{crown} {m['score']}점{streak_txt}\n"
+                crown = " 👑" if m["user_id"] == top_member["user_id"] else ""
+                streak = f" 🔥{m['streak']}" if m["streak"] >= 2 else ""
 
-            prefix = "🏆 " if idx == 0 else ""
+                name_part = f"{m['name']}"
+                score_part = f"{m['score']}"
+
+                team_text += f"{name_part:<10} {score_part:>4}{crown}{streak}\n"
+
+            team_text += "\n────────────────────────"
 
             embed.add_field(
-                name=f"{prefix}{r['team']} ({r['total']}점)",
-                value=team_text,
+                name=header,
+                value=f"```{team_text}```",
                 inline=False
             )
 
             if r["total"] >= target:
                 embed.add_field(
-                    name="🎉 경기 종료",
-                    value=f"{r['team']} 팀 승리!",
+                    name="🏁 MATCH RESULT",
+                    value=f"WINNER : {display_name}",
                     inline=False
                 )
                 conn.execute(
@@ -175,7 +224,7 @@ async def update_board(guild):
                 )
                 conn.commit()
 
-    await message.edit(embed=embed, view=GameView())
+    await message.edit(embed=embed)
 
 # ================= 버튼 UI =================
 
@@ -641,19 +690,48 @@ async def restart(interaction: discord.Interaction):
 
 # ================= 전체초기화 ===============
 
-@tree.command(name="전체초기화", description="모든 데이터 삭제")
+@tree.command(name="전체초기화", description="모든 데이터 및 채널 삭제")
 @app_commands.checks.has_permissions(administrator=True)
 async def reset_all(interaction: discord.Interaction):
 
     await interaction.response.defer(ephemeral=True)
 
+    guild = interaction.guild
+    s = get_system(guild.id)
+
+    # 1️⃣ 채널 삭제
+    if s:
+        board_channel = guild.get_channel(s["board_channel"])
+        game_channel = guild.get_channel(s["game_channel"])
+
+        try:
+            if board_channel:
+                await board_channel.delete()
+        except:
+            pass
+
+        try:
+            if game_channel:
+                await game_channel.delete()
+        except:
+            pass
+
+    # 2️⃣ 카테고리 삭제 (이름 기준)
+    category = discord.utils.get(guild.categories, name="솔랭내기")
+    if category:
+        try:
+            await category.delete()
+        except:
+            pass
+
+    # 3️⃣ DB 완전 삭제
     with db() as conn:
-        conn.execute("DELETE FROM players WHERE guild_id=?",(interaction.guild.id,))
-        conn.execute("DELETE FROM logs WHERE guild_id=?",(interaction.guild.id,))
-        conn.execute("DELETE FROM system WHERE guild_id=?",(interaction.guild.id,))
+        conn.execute("DELETE FROM players WHERE guild_id=?", (guild.id,))
+        conn.execute("DELETE FROM logs WHERE guild_id=?", (guild.id,))
+        conn.execute("DELETE FROM system WHERE guild_id=?", (guild.id,))
         conn.commit()
 
-    await interaction.followup.send("전체 초기화 완료")
+    await interaction.followup.send("🗑 솔랭내기 시스템 완전 삭제 완료")
 
 # ================= 목표점수설정 ===============
 
@@ -774,7 +852,7 @@ async def help_cmd(interaction: discord.Interaction):
 @client.event
 async def on_ready():
     init_db()
-    client.add_view(GameView())
+    # client.add_view(GameView())
     await tree.sync()
     print("솔랭내기 완전 통합 봇 실행 완료")
 
