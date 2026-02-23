@@ -193,49 +193,7 @@ class GameView(discord.ui.View):
     async def dodge_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(DodgeModal())
 
-# ================= 게임 로직 =================
-
-async def result(interaction, win):
-    if not check_game_channel(interaction):
-        return await interaction.response.send_message("🎮 게임-채팅 채널에서만 사용 가능", ephemeral=True)
-
-    s = get_system(interaction.guild.id)
-    if not s or not s["active"]:
-        return await interaction.response.send_message("⛔ 게임 종료 상태", ephemeral=True)
-
-    member = interaction.user
-    r = roll()
-
-    with db() as conn:
-        p = conn.execute("""
-        SELECT score, streak FROM players
-        WHERE guild_id=? AND user_id=?
-        """,(interaction.guild.id,member.id)).fetchone()
-
-        if not p:
-            return await interaction.response.send_message("팀에 등록되지 않음", ephemeral=True)
-
-        new_streak = p["streak"] + 1 if win else 0
-        b = bonus(new_streak)
-        delta = (r + b) if win else -r
-
-        conn.execute("""
-        UPDATE players
-        SET score=?, streak=?
-        WHERE guild_id=? AND user_id=?
-        """,(p["score"]+delta,new_streak,
-            interaction.guild.id,member.id))
-
-        conn.execute("""
-        INSERT INTO logs(guild_id,user_id,delta,prev_streak)
-        VALUES(?,?,?,?)
-        """,(interaction.guild.id,member.id,delta,p["streak"]))
-
-        conn.commit()
-
-    await interaction.response.send_message(f"{'승리' if win else '패배'} {delta:+}")
-    await update_board(interaction.guild)
-
+# ================= 닷지 =================
 async def dodge_logic(interaction, 감점):
     member = interaction.user
 
@@ -464,8 +422,9 @@ async def duo_result(interaction, m1, m2, win):
         )
 
     base = roll()
-    delta = int(base * 0.75)  # 원본과 동일 결과(가독성 개선)
-    delta = delta if win else -delta
+    delta = int(base * 0.75)  # 소수점 버림
+    if not win:
+        delta = -delta
 
     with db() as conn:
         for m in [m1, m2]:
@@ -484,7 +443,7 @@ async def duo_result(interaction, m1, m2, win):
             SET score=?, streak=?
             WHERE guild_id=? AND user_id=?
             """,(p["score"] + delta, new_streak,
-                 interaction.guild.id, m.id))
+                interaction.guild.id, m.id))
 
             conn.execute("""
             INSERT INTO logs(guild_id,user_id,delta,prev_streak)
@@ -639,18 +598,23 @@ async def set_target(interaction: discord.Interaction, 점수: int):
         )
 
     with db() as conn:
-        # system row가 아직 없으면 UPDATE가 안 먹을 수 있음
-        # 점수판생성 이후 쓰는 흐름이면 보통 괜찮지만, 안전하게 INSERT OR IGNORE
-        conn.execute("""
-        INSERT OR IGNORE INTO system(guild_id, board_channel, board_message, game_channel, active, target_score)
-        VALUES(?, 0, 0, 0, 1, ?)
-        """,(interaction.guild.id, 점수))
+        row = conn.execute(
+            "SELECT board_channel FROM system WHERE guild_id=?",
+            (interaction.guild.id,)
+        ).fetchone()
+
+        if not row:
+            return await interaction.response.send_message(
+                "먼저 /점수판생성 실행하세요",
+                ephemeral=True
+            )
 
         conn.execute("""
         UPDATE system
         SET target_score=?
         WHERE guild_id=?
         """,(점수, interaction.guild.id))
+
         conn.commit()
 
     await interaction.response.send_message(
@@ -712,7 +676,7 @@ async def help_cmd(interaction: discord.Interaction):
         value="""
 /점수판생성 → 시스템 자동 생성  
 /팀설정 멤버 팀이름 → 팀 등록/변경(점수 유지)  
-/점수조정 멤버 점수 → 점수 수동 변경  
+/점수조정 멤버 점수 → 점수 증감 조정 (+- 기준)  
 /목표점수설정 점수 → 목표 점수 설정  
 /게임재시작 → 점수 초기화 (팀 유지)  
 /전체초기화 → 전체 데이터 삭제
@@ -738,6 +702,7 @@ async def help_cmd(interaction: discord.Interaction):
 @client.event
 async def on_ready():
     init_db()
+    client.add_view(GameView())
     await tree.sync()
     print("솔랭내기 완전 통합 봇 실행 완료")
 
