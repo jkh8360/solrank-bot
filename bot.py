@@ -457,7 +457,7 @@ async def result(interaction, win):
         SET score=?, streak=?
         WHERE guild_id=? AND user_id=?
         """, (p["score"] + delta, new_streak,
-              interaction.guild.id, member.id))
+            interaction.guild.id, member.id))
 
         conn.execute("""
         INSERT INTO logs(guild_id,user_id,delta,prev_streak)
@@ -466,9 +466,21 @@ async def result(interaction, win):
 
         conn.commit()
 
-    await interaction.followup.send(
-        f"{'승리' if win else '패배'} {delta:+}"
-    )
+    if win:
+        message = f"🟢 승리\n"
+        message += f"기본 점수: +{r}\n"
+
+        if b > 0:
+            message += f"연승 보너스: +{b} ({new_streak}연승)\n"
+        else:
+            message += "연승 보너스: +0\n"
+
+        message += f"총 획득: +{delta}"
+    else:
+        message = f"🔴 패배\n"
+        message += f"차감 점수: {delta}"
+
+    await interaction.followup.send(message)
 
     await update_board(interaction.guild)
 
@@ -509,7 +521,7 @@ async def dodge(interaction: discord.Interaction, 감점: int):
         SET score=?, streak=0
         WHERE guild_id=? AND user_id=?
         """, (p["score"] - 감점,
-              interaction.guild.id, member.id))
+            interaction.guild.id, member.id))
 
         conn.execute("""
         INSERT INTO logs(guild_id,user_id,delta,prev_streak)
@@ -574,14 +586,14 @@ async def duo_result(interaction, m1, m2, win):
 
 @tree.command(name="듀오승리", description="듀오 승리 처리")
 async def duo_win(interaction: discord.Interaction,
-                  멤버1: discord.Member,
-                  멤버2: discord.Member):
+                멤버1: discord.Member,
+                멤버2: discord.Member):
     await duo_result(interaction, 멤버1, 멤버2, True)
 
 @tree.command(name="듀오패배", description="듀오 패배 처리")
 async def duo_lose(interaction: discord.Interaction,
-                   멤버1: discord.Member,
-                   멤버2: discord.Member):
+                멤버1: discord.Member,
+                멤버2: discord.Member):
     await duo_result(interaction, 멤버1, 멤버2, False)
 
 # ================= 되돌리기 =================
@@ -629,8 +641,8 @@ async def undo(interaction: discord.Interaction):
 @tree.command(name="점수조정", description="관리자 점수 증감 조정")
 @app_commands.checks.has_permissions(administrator=True)
 async def adjust_score(interaction: discord.Interaction,
-                       멤버: discord.Member,
-                       변화량: int):
+                        멤버: discord.Member,
+                        변화량: int):
 
     await interaction.response.defer()
 
@@ -698,34 +710,24 @@ async def reset_all(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
 
     guild = interaction.guild
-    s = get_system(guild.id)
 
-    # 1️⃣ 채널 삭제
-    if s:
-        board_channel = guild.get_channel(s["board_channel"])
-        game_channel = guild.get_channel(s["game_channel"])
-
-        try:
-            if board_channel:
-                await board_channel.delete()
-        except:
-            pass
-
-        try:
-            if game_channel:
-                await game_channel.delete()
-        except:
-            pass
-
-    # 2️⃣ 카테고리 삭제 (이름 기준)
     category = discord.utils.get(guild.categories, name="솔랭내기")
-    if category:
-        try:
-            await category.delete()
-        except:
-            pass
 
-    # 3️⃣ DB 완전 삭제
+    # 1️⃣ 카테고리 안 채널 먼저 전부 삭제
+    if category:
+        for channel in category.channels:
+            try:
+                await channel.delete(reason="솔랭내기 전체초기화")
+            except Exception as e:
+                print("채널 삭제 실패:", e)
+
+        # 2️⃣ 카테고리 삭제
+        try:
+            await category.delete(reason="솔랭내기 전체초기화")
+        except Exception as e:
+            print("카테고리 삭제 실패:", e)
+
+    # 3️⃣ DB 초기화
     with db() as conn:
         conn.execute("DELETE FROM players WHERE guild_id=?", (guild.id,))
         conn.execute("DELETE FROM logs WHERE guild_id=?", (guild.id,))
