@@ -197,6 +197,9 @@ class GameView(discord.ui.View):
 async def dodge_logic(interaction, 감점):
     member = interaction.user
 
+    if not interaction.response.is_done():
+        await interaction.response.defer()
+
     with db() as conn:
         p = conn.execute("""
         SELECT score, streak FROM players
@@ -220,7 +223,7 @@ async def dodge_logic(interaction, 감점):
 
         conn.commit()
 
-    await interaction.response.send_message(f"닷지 -{감점}점")
+    await interaction.followup.send(f"닷지 -{감점}점")
     await update_board(interaction.guild)
 
 # ================= 팀 설정(추가) =================
@@ -228,29 +231,52 @@ async def dodge_logic(interaction, 감점):
 # - 기존 점수/연승 유지
 # - name/display_name 최신으로 갱신
 
-@tree.command(name="팀설정", description="유저를 팀에 등록/변경 (점수/연승 유지)")
+TEAM_CHOICES = [
+    app_commands.Choice(name="🔵 블루팀", value="블루팀"),
+    app_commands.Choice(name="🔴 레드팀", value="레드팀"),
+    app_commands.Choice(name="🟢 그린팀", value="그린팀"),
+    app_commands.Choice(name="🟣 퍼플팀", value="퍼플팀"),
+]
+
+@tree.command(name="팀설정", description="팀 등록/변경")
 @app_commands.checks.has_permissions(administrator=True)
-@app_commands.describe(멤버="팀을 설정할 멤버", 팀이름="예: A팀, B팀")
-async def set_team(interaction: discord.Interaction, 멤버: discord.Member, 팀이름: str):
+@app_commands.choices(팀이름=TEAM_CHOICES)
+async def set_team(
+    interaction: discord.Interaction,
+    팀이름: app_commands.Choice[str],
+    멤버1: discord.Member,
+    멤버2: discord.Member = None,
+    멤버3: discord.Member = None,
+    멤버4: discord.Member = None,
+):
+    team_value = 팀이름.value
+    members = [m for m in [멤버1, 멤버2, 멤버3, 멤버4] if m]
+
+    await interaction.response.defer()
+
     with db() as conn:
-        existing = conn.execute("""
-        SELECT score, streak
-        FROM players
-        WHERE guild_id=? AND user_id=?
-        """, (interaction.guild.id, 멤버.id)).fetchone()
+        for 멤버 in members:
+            existing = conn.execute("""
+            SELECT score, streak
+            FROM players
+            WHERE guild_id=? AND user_id=?
+            """, (interaction.guild.id, 멤버.id)).fetchone()
 
-        score = existing["score"] if existing else 0
-        streak = existing["streak"] if existing else 0
+            score = existing["score"] if existing else 0
+            streak = existing["streak"] if existing else 0
 
-        conn.execute("""
-        INSERT OR REPLACE INTO players(guild_id, user_id, name, team, score, streak)
-        VALUES(?,?,?,?,?,?)
-        """, (interaction.guild.id, 멤버.id, 멤버.display_name, 팀이름, score, streak))
+            conn.execute("""
+            INSERT OR REPLACE INTO players(guild_id, user_id, name, team, score, streak)
+            VALUES(?,?,?,?,?,?)
+            """, (interaction.guild.id, 멤버.id,
+                멤버.display_name, team_value, score, streak))
+
         conn.commit()
 
-    await interaction.response.send_message(
-        f"✅ {멤버.display_name} → **{팀이름}** 팀으로 설정 완료 (현재 {score}점, 연승 {streak})"
+    await interaction.followup.send(
+        f"✅ {len(members)}명 → **{team_value}** 설정 완료"
     )
+
     await update_board(interaction.guild)
 
 # ================= 시스템 생성 =================
@@ -327,6 +353,8 @@ async def result(interaction, win):
     member = interaction.user
     r = roll()
 
+    await interaction.response.defer()
+
     with db() as conn:
         p = conn.execute("""
         SELECT score, streak FROM players
@@ -357,7 +385,7 @@ async def result(interaction, win):
 
         conn.commit()
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"{'승리' if win else '패배'} {delta:+}"
     )
 
@@ -384,6 +412,7 @@ async def dodge(interaction: discord.Interaction, 감점: int):
         )
 
     member = interaction.user
+    await interaction.response.defer()
 
     with db() as conn:
         p = conn.execute("""
@@ -408,7 +437,7 @@ async def dodge(interaction: discord.Interaction, 감점: int):
 
         conn.commit()
 
-    await interaction.response.send_message(f"닷지 -{감점}점")
+    await interaction.followup.send(f"닷지 -{감점}점")
     await update_board(interaction.guild)
 
 # ================= 듀오 =================
@@ -425,6 +454,8 @@ async def duo_result(interaction, m1, m2, win):
     delta = int(base * 0.75)  # 소수점 버림
     if not win:
         delta = -delta
+
+    await interaction.response.defer()
 
     with db() as conn:
         for m in [m1, m2]:
@@ -452,7 +483,7 @@ async def duo_result(interaction, m1, m2, win):
 
         conn.commit()
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"듀오 {'승리' if win else '패배'} 각자 {delta:+}"
     )
 
@@ -482,6 +513,7 @@ async def undo(interaction: discord.Interaction):
         )
 
     member = interaction.user
+    await interaction.response.defer()
 
     with db() as conn:
         log = conn.execute("""
@@ -504,7 +536,7 @@ async def undo(interaction: discord.Interaction):
         conn.execute("DELETE FROM logs WHERE id=?",(log["id"],))
         conn.commit()
 
-    await interaction.response.send_message("최근 기록 되돌림 완료")
+    await interaction.followup.send("최근 기록 되돌림 완료")
     await update_board(interaction.guild)
 
 # ================= 관리자 =================
@@ -516,6 +548,8 @@ async def undo(interaction: discord.Interaction):
 async def adjust_score(interaction: discord.Interaction,
                        멤버: discord.Member,
                        변화량: int):
+
+    await interaction.response.defer()
 
     with db() as conn:
         p = conn.execute("""
@@ -544,7 +578,7 @@ async def adjust_score(interaction: discord.Interaction,
 
         conn.commit()
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"🛠 {멤버.display_name} {변화량:+}점 적용 (현재 {new_score}점)"
     )
 
@@ -555,6 +589,7 @@ async def adjust_score(interaction: discord.Interaction,
 @tree.command(name="게임재시작", description="점수 초기화 (팀 유지)")
 @app_commands.checks.has_permissions(administrator=True)
 async def restart(interaction: discord.Interaction):
+    await interaction.response.defer()
 
     with db() as conn:
         conn.execute("""
@@ -583,7 +618,7 @@ async def reset_all(interaction: discord.Interaction):
         conn.execute("DELETE FROM system WHERE guild_id=?",(interaction.guild.id,))
         conn.commit()
 
-    await interaction.response.send_message("전체 초기화 완료")
+    await interaction.followup.send("전체 초기화 완료")
 
 # ================= 목표점수설정 ===============
 
@@ -596,6 +631,8 @@ async def set_target(interaction: discord.Interaction, 점수: int):
             "1 이상 입력하세요",
             ephemeral=True
         )
+    
+    await interaction.response.defer()
 
     with db() as conn:
         row = conn.execute(
@@ -617,7 +654,7 @@ async def set_target(interaction: discord.Interaction, 점수: int):
 
         conn.commit()
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"🎯 목표 점수 {점수}점으로 변경 완료"
     )
 
