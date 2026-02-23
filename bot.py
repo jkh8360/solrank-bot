@@ -18,7 +18,7 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-threading.Thread(target=run_web).start()
+threading.Thread(target=run_web, daemon=True).start()
 
 TOKEN = os.environ["TOKEN"]
 DB = "solrank.db"
@@ -329,10 +329,11 @@ async def set_team(
     멤버3: discord.Member = None,
     멤버4: discord.Member = None,
 ):
+    await interaction.response.defer()
+
     team_value = 팀이름.value
     members = [m for m in [멤버1, 멤버2, 멤버3, 멤버4] if m]
 
-    await interaction.response.defer()
 
     with db() as conn:
         for 멤버 in members:
