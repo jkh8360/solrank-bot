@@ -466,9 +466,11 @@ async def duo_result(interaction, m1, m2, win):
         )
 
     base = roll()
-    delta = int(base * 0.75)  # 소수점 버림
-    if not win:
-        delta = -delta
+    
+    if win:
+        delta = int(base * 0.75) # 승리 시 0.75배
+    else:
+        delta = -base
 
     await interaction.response.defer()
 
