@@ -4,6 +4,22 @@ import sqlite3
 import discord
 from discord import app_commands
 
+import threading
+from flask import Flask
+import os
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot is running!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+threading.Thread(target=run_web).start()
+
 TOKEN = os.environ["TOKEN"]
 DB = "solrank.db"
 
@@ -377,7 +393,7 @@ async def result(interaction, win):
         """,(interaction.guild.id, member.id)).fetchone()
 
         if not p:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "팀에 등록되지 않음",
                 ephemeral=True
             )
@@ -466,7 +482,7 @@ async def duo_result(interaction, m1, m2, win):
         )
 
     base = roll()
-    
+
     if win:
         delta = int(base * 0.75) # 승리 시 0.75배
     else:
@@ -620,7 +636,7 @@ async def restart(interaction: discord.Interaction):
         """,(interaction.guild.id,))
         conn.commit()
 
-    await interaction.response.send_message("게임 재시작 완료")
+    await interaction.followup.send("게임 재시작 완료")
     await update_board(interaction.guild)
 
 # ================= 전체초기화 ===============
@@ -628,6 +644,8 @@ async def restart(interaction: discord.Interaction):
 @tree.command(name="전체초기화", description="모든 데이터 삭제")
 @app_commands.checks.has_permissions(administrator=True)
 async def reset_all(interaction: discord.Interaction):
+
+    await interaction.response.defer(ephemeral=True)
 
     with db() as conn:
         conn.execute("DELETE FROM players WHERE guild_id=?",(interaction.guild.id,))
@@ -698,7 +716,7 @@ async def help_cmd(interaction: discord.Interaction):
 /되돌리기 → 최근 기록 1회 취소  
 /닷지 감점 → 입력한 점수만큼 차감  
 /듀오승리 멤버1 멤버2 → 각자 0.75배 점수  
-/듀오패배 멤버1 멤버2 → 각자 0.75배 차감
+/듀오패배 멤버1 멤버2 → 각자 1배 차감
 """,
         inline=False
     )
