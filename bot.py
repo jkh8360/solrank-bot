@@ -181,15 +181,30 @@ class GameView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="승리", style=discord.ButtonStyle.success, emoji="🟢")
+    @discord.ui.button(
+        label="승리",
+        style=discord.ButtonStyle.success,
+        emoji="🟢",
+        custom_id="game_win"
+    )
     async def win_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await result(interaction, True)
 
-    @discord.ui.button(label="패배", style=discord.ButtonStyle.danger, emoji="🔴")
+    @discord.ui.button(
+        label="패배",
+        style=discord.ButtonStyle.danger,
+        emoji="🔴",
+        custom_id="game_lose"
+    )
     async def lose_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await result(interaction, False)
 
-    @discord.ui.button(label="닷지", style=discord.ButtonStyle.secondary, emoji="🟡")
+    @discord.ui.button(
+        label="닷지",
+        style=discord.ButtonStyle.secondary,
+        emoji="🟡",
+        custom_id="game_dodge"
+    )
     async def dodge_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(DodgeModal())
 
