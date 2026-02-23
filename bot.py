@@ -285,6 +285,8 @@ async def set_team(
 @app_commands.checks.has_permissions(administrator=True)
 async def create_system(interaction: discord.Interaction):
 
+    await interaction.response.defer(ephemeral=True)  # ⭐ 중요
+
     guild = interaction.guild
 
     category = discord.utils.get(guild.categories, name="솔랭내기")
@@ -321,7 +323,6 @@ async def create_system(interaction: discord.Interaction):
 
     msg = await board.send(embed=embed)
 
-    # (버그수정) target_score를 245로 하드코딩하지 않고 현재 target 사용
     with db() as conn:
         conn.execute("""
         INSERT OR REPLACE INTO system(guild_id, board_channel, board_message, game_channel, active, target_score)
@@ -329,9 +330,8 @@ async def create_system(interaction: discord.Interaction):
         """, (guild.id, board.id, msg.id, game.id, target))
         conn.commit()
 
-    await interaction.response.send_message(
-        f"✅ 생성 완료\n📊 {board.mention}\n🎮 {game.mention}",
-        ephemeral=True
+    await interaction.followup.send(
+        f"✅ 생성 완료\n📊 {board.mention}\n🎮 {game.mention}"
     )
 
 # ================= 승패 =================
